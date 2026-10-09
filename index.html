@@ -627,4 +627,88 @@ try{ matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>se
 themeLabel();
 load(EMBED,'Datos: ACCIONES 2026 (incrustados)');
 })();
-</script>
+// --- 1. CONFIGURACIÓN DE MICROSOFT 365 ---
+const msalConfig = {
+    auth: {
+        clientId: "fc58e794-f3a2-4724-9915-a055e03af9c1", // Tu Id. de aplicación
+        authority: "https://login.microsoftonline.com/c6fc65e5-dddd-424e-b6b3-2b2f22c13fb0", // Tu Id. de inquilino
+        redirectUri: "https://jargusaai-svg.github.io/dashboard-siniestros/" // Tu URI configurada en Azure
+    }
+};
+
+const msalInstance = new msal.PublicClientApplication(msalConfig);
+const fileId = "014CNGSGXNLZHIRTQ57NF3HOA56VPS3FCP"; // El ID de FLUJO_SINIESTROS.xlsx
+let activeAccount = null;
+
+// --- 2. LÓGICA DE CONEXIÓN A ONEDRIVE ---
+async function conectarOneDrive() {
+    const btn = document.getElementById('onedriveBtn');
+    const status = document.getElementById('status');
+    
+    try {
+        btn.innerText = "⏳ Conectando...";
+        
+        // 2.1 Autenticación
+        if (!activeAccount) {
+            const loginResponse = await msalInstance.loginPopup({ scopes: ["Files.Read.All"] });
+            activeAccount = loginResponse.account;
+            document.getElementById('logoutBtn').style.display = "inline-flex";
+        }
+        
+        // 2.2 Obtener Token
+        const tokenResponse = await msalInstance.acquireTokenSilent({
+            scopes: ["Files.Read.All"],
+            account: activeAccount
+        });
+
+        status.hidden = false;
+        status.className = "status info";
+        status.innerText = "Descargando base de datos desde OneDrive...";
+
+        // 2.3 Llamada a Graph API usando tu fileId
+        const response = await fetch(`https://graph.microsoft.com/v1.0/me/drive/items/${fileId}/content`, {
+            headers: { 'Authorization': `Bearer ${tokenResponse.accessToken}` }
+        });
+
+        if (!response.ok) throw new Error(`Error de descarga: ${response.status}`);
+
+        // 2.4 Procesar el Excel descargado (SheetJS)
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+        const sheetName = workbook.SheetNames.includes('ACCIONES 2026') ? 'ACCIONES 2026' : workbook.SheetNames[0];
+        const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+
+        // 2.5 Actualizar Interfaz
+        status.className = "status ok";
+        status.innerText = `Éxito: ${rawData.length} actuaciones descargadas.`;
+        setTimeout(() => status.hidden = true, 4000);
+        
+        btn.innerText = "☁️ Actualizar datos";
+        document.getElementById('corte').innerText = new Date().toLocaleTimeString();
+        document.getElementById('srcChip').innerText = "☁️ OneDrive";
+
+        console.log("Datos de OneDrive listos:", rawData);
+
+        // AQUÍ CONECTAMOS CON TU CÓDIGO ORIGINAL:
+        // Verifica si tienes una función para procesar datos, como init(rawData) o actualizarDashboard(rawData).
+        // Si tu variable global es 'BASE' o 'datos', asígnala aquí:
+        // Ejemplo: BASE = rawData; iniciarFiltros();
+
+    } catch (error) {
+        console.error("Error al conectar con OneDrive:", error);
+        status.hidden = false;
+        status.className = "status err";
+        status.innerText = "Falló la conexión. Revisa consola (F12).";
+        btn.innerText = "☁️ Reintentar Conexión";
+    }
+}
+
+// --- 3. EVENTOS DE BOTONES ---
+document.getElementById('onedriveBtn').addEventListener('click', conectarOneDrive);
+document.getElementById('logoutBtn').addEventListener('click', () => {
+    msalInstance.logoutPopup({ account: activeAccount }).then(() => {
+        activeAccount = null;
+        document.getElementById('logoutBtn').style.display = "none";
+        document.getElementById('onedriveBtn').innerText = "☁️ Conectar a OneDrive";
+    });
+});</script>
